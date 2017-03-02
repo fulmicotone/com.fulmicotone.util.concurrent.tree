@@ -1,5 +1,6 @@
 package com.fulmicotone.util.concurrent;
 
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -7,7 +8,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
-public class LimeTree {
+public class LimeTree implements  ITree{
 
     private final Logger log = LoggerFactory.getLogger(this.getClass());
     private final Map<String, Lime> fruitsO2Map = new LinkedHashMap<>();
@@ -15,13 +16,10 @@ public class LimeTree {
     private BlockingQueue<Pill> treeActivitiesQueue = new LinkedBlockingQueue<>();
     private volatile long cutOnInactivityForMillis = -1;
     private boolean activitiesMonitorIsActive=false;
-    private boolean atLeastOneEndlessLimeIsCommited=false;
-
-    private FnLimeDesc fnLimeDesc = new FnLimeDesc();
+    private Phaser phaser=new Phaser();
 
 
-    public LimeTree() {
-    }
+    public LimeTree() {}
 
     public <E> BlockingQueue<E> getWireBy(String key) {
 
@@ -46,25 +44,31 @@ public class LimeTree {
      * set variable that indicates to
      * every fruits that we want to stop whole system
      */
-    public void clearCutBrutal() {
-        this
-                .treeLocalExecutorService
-                .shutdownNow();
-    }
+    public void clearCutBrutal() {this.treeLocalExecutorService.shutdownNow();}
 
     /**
      * @return close the tree executorService when every fruits isFinished
      */
     public void clearCutAwaitActs(long wait) {
 
-        treeLocalExecutorService.shutdown();
+
         try {
-            wait = wait == -1 ? Long.MAX_VALUE : wait;
-            treeLocalExecutorService.awaitTermination(wait, TimeUnit.MILLISECONDS);
-        } catch (InterruptedException e) {
-            log.error("error in clearCutAwaitActs {}", e.toString());
+
+            if(wait==-1){
+                phaser.awaitAdvanceInterruptibly(0);
+
+            }else {
+
+                phaser.awaitAdvanceInterruptibly(0, wait, TimeUnit.MILLISECONDS);
+            }
+
+        } catch (InterruptedException e) { log.error("something is gone wrong");}
+        catch (TimeoutException e) {
+            log.info("time reserved to system expired!! force shutdown");
+
         }
-    }
+        this.clearCutBrutal();
+       }
 
 
     /**
@@ -77,8 +81,7 @@ public class LimeTree {
     /**
      * @return stop whole system after millis of inactivities
      */
-    public void clearCutOnTreeInactivity(long inactivityTime) {
-
+    public void setTimeoutForInactivity(long inactivityTime) {
         this.cutOnInactivityForMillis = inactivityTime;
         tryCommitActivitiesMonitor();
     }
@@ -109,22 +112,24 @@ public class LimeTree {
     private boolean addFruit(Lime f) {
 
         log.debug("add fruit with key: {} ", f.key);
-
-        log.debug(fnLimeDesc.apply(f));
-
+        log.debug( String.format(
+                "{'key':%s ," +
+                        "'consumeAsync':%s," +
+                        "'wilting':%s," +
+                        "'liveAye':%s," +
+                        "'autoCommit':%s}",
+                f.key,
+                f.consumeAsync,
+                f.wiltingInMillis,
+                f.liveAye,
+                f.autoCommit));
         Lime previus = this.fruitsO2Map.put(f.key, f);
-
         log.debug("after add limes in tree are: {} ", fruitsO2Map.size());
-
         if (f.autoCommit) {
-
             log.debug("commit fruit with key: {} ", f.key);
-
             commitFruits(f);
         }
-
         return previus != null;
-
     }
 
 
@@ -132,16 +137,7 @@ public class LimeTree {
 
         Arrays.asList(fruits)
                 .stream()
-                .forEach((f) -> {
-                    this.treeLocalExecutorService.submit(f);
-
-                    this.atLeastOneEndlessLimeIsCommited = f.liveAye;
-
-                    if (this.atLeastOneEndlessLimeIsCommited) {
-                        cutOnInactivityForMillis = Long.MAX_VALUE;
-                    }
-                });
-
+                .forEach(this.treeLocalExecutorService::submit);
         tryCommitActivitiesMonitor();
 
     }
@@ -149,13 +145,15 @@ public class LimeTree {
 
     private void riseAgain(Lime dead) {
         Lime raised = new Lime<>();
-        raised.act = (x,y,z)->{System.out.print("cdd");};//dead.act;
+        raised.limeTree=dead.limeTree;
+        raised.act = dead.act;
         raised.queue = dead.queue;
         raised.liveAye = dead.liveAye;
         raised.consumeAsync = dead.consumeAsync;
         raised.autoCommit = true;
         raised.wiltingInMillis = dead.wiltingInMillis;
         raised.key = dead.key;
+        raised.isRaised=true;
         addFruit(raised);
 
     }
@@ -172,17 +170,10 @@ public class LimeTree {
         @Override
         public void run() {
 
-           int activeFruits = (int) tree.fruitsO2Map
-                   .values()
-                   .stream()
-                   .filter(c -> c.isCommitted&&c.isFinished==false)
-                   .count();
-
-            if (activeFruits > 0 ) {
                 try {
                     while (!Thread.currentThread().isInterrupted()) {
-
-                        Pill pill = treeActivitiesQueue.poll(tree.cutOnInactivityForMillis, TimeUnit.MILLISECONDS);
+                        Pill pill = treeActivitiesQueue
+                                .poll(tree.cutOnInactivityForMillis, TimeUnit.MILLISECONDS);
                         if (pill == null) {
                             log.info("monitor catch inactivity!!");
                             this.tree.clearCutBrutal();
@@ -193,7 +184,6 @@ public class LimeTree {
                     tryCommitActivitiesMonitor();
                 }
             }
-        }
     }
 
 
@@ -204,53 +194,45 @@ public class LimeTree {
      * terminate after millis of inactivity
      * consume the queue in async way
      */
-    public static class Lime<E> implements Runnable {
+    public static class Lime<E> implements Runnable,ILime<E> {
 
         private Logger log = LoggerFactory.getLogger(this.getClass());
         private LimeTree limeTree;
         private Act act;
         private BlockingQueue<E> queue;
         private ExecutorService foreEachExecutor;
-
         //config
-        protected boolean liveAye;
-        protected boolean autoCommit = false;
-        protected boolean consumeAsync;
-        protected long wiltingInMillis;
-        //status
-        protected boolean isCommitted = false;
-        protected boolean isFinished = false;
-        protected String key;
+        private boolean liveAye;
+        private boolean autoCommit = false;
+        private boolean consumeAsync;
+        private long wiltingInMillis;
+        //private
+        private boolean isCommitted = false;
+        private boolean isFinished = false;
+        private  boolean isRaised=false;
+        private String key;
 
+
+        private Lime() {}
 
         public BlockingQueue<E> getWire() {
             return this.queue;
         }
 
-
-        private Lime() {
-        }
-
-
-        private void doBeforeRun() {
-            //executor
-            if (this.consumeAsync && this.foreEachExecutor == null) {
-                this.foreEachExecutor = Executors.newSingleThreadExecutor();
-            }
-            this.isCommitted = true;
-        }
-
-
         public void run() {
 
             log.info(String.format("Consumer %s start!", this.toString()));
-
             boolean exit = false;
-
-            doBeforeRun();
+            this.isCommitted = true;
+            if(this.isRaised==false) {this.limeTree.phaser.register();}
+            boolean raising=false;
+            //executor
+            if (this.consumeAsync &&
+                    this.foreEachExecutor == null) {
+                this.foreEachExecutor = Executors.newSingleThreadExecutor();
+            }
 
             try {
-
                 while (!Thread.currentThread().isInterrupted() && exit == false) {
 
                     final E pill;
@@ -259,6 +241,7 @@ public class LimeTree {
                         //waiting until element become available
                         pill = this.queue.take();
                     } else {
+
                         //waiting until the patience finish¡
                         pill = this.queue
                                 .poll(this.wiltingInMillis, TimeUnit.MILLISECONDS);
@@ -278,27 +261,27 @@ public class LimeTree {
 
                 }
 
+            } catch (InterruptedException ex1){
+                log.info("{} has been interrupted",this.toString());
+
             } catch (Exception ex) {
                 //check if must restart
                 log.error("error on forEach {} ", ex.toString());
-
                 if (this.liveAye) {
-
+                    log.info(String.format("Consumer %s death and riseAgain miracle!", this.toString()));
                     limeTree.riseAgain(this);
+                    raising=true;
                 }
             }
 
-
-            doOnExit();
-        }
-
-
-        private void doOnExit() {
-
+            if(raising==false){
+                log.info("deregister"+this.toString());
+                this.limeTree.phaser.arriveAndDeregister();
+            }
             this.isFinished = true;
+            if(exit){log.info(String.format("Consumer %s wilted and fallen!", this.toString()));}
             log.info(String.format("Consumer %s end!", this.toString()));
         }
-
 
         /**
          * set tree
@@ -335,7 +318,6 @@ public class LimeTree {
                 return this;
             }
 
-
             /**
              * set if on error the fruit will be recommitted in the executors
              *
@@ -354,7 +336,6 @@ public class LimeTree {
                 this.patienceBeforeWilting = millis;
                 return this;
             }
-
 
             public FruitBuilder setAutoCommit(boolean autocommit) {
                 this.autocommit = autocommit;
@@ -379,7 +360,6 @@ public class LimeTree {
                 this.consumeAsync = async;
                 return this;
             }
-
 
             public FruitBuilder setProducerTree(LimeTree treeProducer) {
                 this.treeProducer = treeProducer;
@@ -406,8 +386,6 @@ public class LimeTree {
                 return limeToAdd;
             }
         }
-
-
         @Override
         public String toString() {
             return String

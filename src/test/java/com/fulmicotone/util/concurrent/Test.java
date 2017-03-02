@@ -25,7 +25,7 @@ public class Test {
                 }, 0l, millis);
     }
 
-//   @org.junit.Test
+   @org.junit.Test
     public void forceShutdownWholeSystemCase() throws Exception {
 
         LimeTree tree=new LimeTree();
@@ -33,7 +33,12 @@ public class Test {
 
         final  BlockingQueue<String> fruitWireQueue = tree
                 .<String>newLime()
-                .setAct((e, t,c) -> System.out.println(e))
+                .setAct((e, t,c) -> {
+            System.out.println(e);
+
+
+
+        })
                 .create().getWire();
 
 
@@ -53,7 +58,7 @@ public class Test {
         Assert.assertTrue("size was:"+output.size(),output.size()==5);
     }
 
-    //@org.junit.Test
+    @org.junit.Test
     public void shutdownForTreeInactivityCase(){
         List<String> output=new ArrayList<>();
 
@@ -92,12 +97,12 @@ public class Test {
 
          });
 
-         tree.clearCutOnTreeInactivity(2000 );
+         tree.setTimeoutForInactivity(2000 );
          tree.clearCutAwaitActs();
          Assert.assertTrue("unexpected size",output.size()==11);
     }
 
-  //  @org.junit.Test
+    @org.junit.Test
     public void shutdownForWiltingAllLimecase(){
 
         List<String> output=new ArrayList<>();
@@ -142,55 +147,93 @@ public class Test {
 
     }
 
-    @org.junit.Test
-    public void endlessLime(){
 
-
+    /**
+     * simula la presenza di due consumer infiniti ( con recommit in caso di eccezione)
+     * e verifica che vengano effettivamente riavviati in caso di eccezione
+     * e che vengano terminati in caso di rallentamenti*/
+     @org.junit.Test
+    public void endlessLimeMultipartner(){
         List<String> output=new ArrayList<>();
-
         LimeTree tree=new LimeTree();
-
         BlockingQueue<String> wireA= tree.newLime()
                 .<String>setAct((pill, context, lime) -> {
-
-            if(pill.equals("fire exception")){ throw new RuntimeException("sf");}
-            System.out.println("pill:"+pill);
+            if(pill.equals("fire exception")){ throw new RuntimeException("sf"); }
+                    output.add((String) pill);
         })
-                .setWilting(2000)
+                .setWilting(2300)
                 .setLiveAye(true)
-                .create()
+                .create("A")
                 .getWire();
-
-/*
-
         BlockingQueue<String> wireB= tree.newLime()
                 .<String>setAct((pill, context, lime) -> {
                     if(pill.equals("fire exception")){ throw new RuntimeException("sf");}
-                    System.out.println("pill:"+pill);
+                    output.add((String) pill);
+                    System.out.println("b:"+pill);
                 })
-                .setWilting(1000)
+                .setWilting(1500)
                 .setLiveAye(true)
-                .create()
+                .create("B")
                 .getWire();
-*/
-
 
         doEach(500,(i)-> {
-            System.out.println("add pill");
-            if(i==3){wireA.add("fire exception");}
+            if(i==2){wireB.add("fire exception"); return ;}
+            if(i==3){wireA.add("fire exception"); return;}
+            if(i>5){
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+            if(i>10){
+                try {
+                    Thread.sleep(1500);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+            wireB.add(UUID.randomUUID().toString());
+            wireA.add(UUID.randomUUID().toString());
+        });
+        tree.clearCutAwaitActs();
+      Assert.assertTrue("unexpected output size:"+output.size(),output.size()==13);
+    }
+
+   @org.junit.Test
+    public void endlessSingleLime(){
+
+       List<String> output=new ArrayList<>();
+       LimeTree tree = new LimeTree();
+
+       BlockingQueue<String> wireA= tree.newLime()
+               .<String>setAct((pill, context, lime) -> {
+                   if(pill.equals("fire exception")){ throw new RuntimeException("sf"); }
+                   output.add((String) pill);
+                   System.out.println(pill);
+               })
+               .setWilting(2300)
+               .setLiveAye(true)
+               .create("A")
+               .getWire();
+
+
+        doEach(1000,(i)-> {
+
+            if(i==2){ wireA.add("fire exception"); return;}
+            if(i==5){tree.clearCutBrutal();}
+
             wireA.add(UUID.randomUUID().toString());
         });
 
 
-
         tree.clearCutAwaitActs();
+
+       Assert.assertTrue("unexpected output size:"+output.size(),output.size()==4);
+
+
 
 
     }
-
-
-//funzione che verra eseguita allo shutdown dell'intero albero
-    //in questo modo saraà possibile preservare le code
-    public void onendwholesystem(){}
 
 }

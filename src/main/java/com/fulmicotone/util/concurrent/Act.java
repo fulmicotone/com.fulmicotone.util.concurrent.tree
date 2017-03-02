@@ -7,6 +7,6 @@ package com.fulmicotone.util.concurrent;
 @FunctionalInterface
 public interface Act<E> {
 
-    void forEach(E pill,LimeTree context,LimeTree.Lime consumer);
+    void forEach(E pill,ITree ctx,ILime consumer);
 
 }
