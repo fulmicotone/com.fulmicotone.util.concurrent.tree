@@ -16,7 +16,9 @@ public class LimeTree implements  ITree{
     private BlockingQueue<Pill> treeActivitiesQueue = new LinkedBlockingQueue<>();
     private volatile long cutOnInactivityForMillis = -1;
     private boolean activitiesMonitorIsActive=false;
+    private boolean terminatingForInactivities=false;
     private Phaser phaser=new Phaser();
+    private final DefaultTreeLifeCycle defaultTreeLifeCycleListener=new DefaultTreeLifeCycle();
 
 
     public LimeTree() {}
@@ -28,7 +30,16 @@ public class LimeTree implements  ITree{
                 .get();
     }
 
-    public boolean submitUncommitedFruits() {
+
+
+    public void addListener(TreeLifeCycleListener listener){
+
+        this.defaultTreeLifeCycleListener
+                .addNewLifeCycleFollower(listener);
+
+    }
+
+    public boolean submitUncommited() {
 
         commitFruits(fruitsO2Map.values()
                 .stream()
@@ -51,22 +62,20 @@ public class LimeTree implements  ITree{
      */
     public void clearCutAwaitActs(long wait) {
 
-
         try {
-
-            if(wait==-1){
-                phaser.awaitAdvanceInterruptibly(0);
-
-            }else {
-
-                phaser.awaitAdvanceInterruptibly(0, wait, TimeUnit.MILLISECONDS);
-            }
-
-        } catch (InterruptedException e) { log.error("something is gone wrong");}
-        catch (TimeoutException e) {
-            log.info("time reserved to system expired!! force shutdown");
-
+            if(wait==-1){phaser.awaitAdvanceInterruptibly(0);}
+            else {phaser.awaitAdvanceInterruptibly(0, wait, TimeUnit.MILLISECONDS);}
+        } catch (InterruptedException e) {
+            log.error("something is gone wrong");
+            this.defaultTreeLifeCycleListener.onTreeShutdown(this, ELimeTreeEnd.ERROR,e);
         }
+        catch (TimeoutException e) {
+            log.info("time  expired!! force shutdown");
+            this.defaultTreeLifeCycleListener.onTreeShutdown(this, ELimeTreeEnd.ERROR,e);
+        }
+
+        if(terminatingForInactivities==false){  this.defaultTreeLifeCycleListener
+                .onTreeShutdown(this, ELimeTreeEnd.REGULAR);}
         this.clearCutBrutal();
        }
 
@@ -137,7 +146,11 @@ public class LimeTree implements  ITree{
 
         Arrays.asList(fruits)
                 .stream()
-                .forEach(this.treeLocalExecutorService::submit);
+                .forEach((f)->{
+            this.treeLocalExecutorService.submit(f);
+            this.defaultTreeLifeCycleListener.onLimeCommit(this,f);
+
+        });
         tryCommitActivitiesMonitor();
 
     }
@@ -159,10 +172,43 @@ public class LimeTree implements  ITree{
     }
 
 
+    private class DefaultTreeLifeCycle implements TreeLifeCycleListener {
+
+        private List<TreeLifeCycleListener> treeLifeCycles=new ArrayList<>();
+
+        public void addNewLifeCycleFollower(TreeLifeCycleListener follower){
+            this.treeLifeCycles.add(follower);
+        }
+
+
+        @Override///k
+        public <T> void onPillIncome(LimeTree ctx, Lime lime, T pill) {
+            treeLifeCycles.stream().forEach(c->c.onPillIncome(ctx,lime,pill));
+        }
+
+        @Override
+        public void onLimeCommit(LimeTree ctx, Lime lime) {
+            treeLifeCycles.stream().forEach(c->c.onLimeCommit(ctx,lime));
+        }
+
+        @Override
+        public void onLimeFinish(LimeTree ctx, Lime lime, ELimeEnd reason, Throwable... exceptions) {
+
+            treeLifeCycles.stream().forEach(c->c.onLimeFinish(ctx,lime,reason));
+        }
+
+        @Override
+        public void onTreeShutdown(LimeTree ctx, ELimeTreeEnd reason, Throwable... exceptions) {
+            treeLifeCycles.stream().forEach(c->c.onTreeShutdown(ctx,reason,exceptions));
+        }
+
+
+    }
+
+
     private class ActivitiesMonitor implements Runnable {
 
         private final LimeTree tree;
-
         public ActivitiesMonitor(LimeTree tree) {
             this.tree = tree;
         }
@@ -175,7 +221,10 @@ public class LimeTree implements  ITree{
                         Pill pill = treeActivitiesQueue
                                 .poll(tree.cutOnInactivityForMillis, TimeUnit.MILLISECONDS);
                         if (pill == null) {
-                            log.info("monitor catch inactivity!!");
+                            log.debug("monitor catch inactivity!!");
+                            this.tree.terminatingForInactivities=true;
+                            this.tree.defaultTreeLifeCycleListener
+                                    .onTreeShutdown(this.tree, ELimeTreeEnd.INACTIVITY);
                             this.tree.clearCutBrutal();
                         }
                     }
@@ -212,7 +261,6 @@ public class LimeTree implements  ITree{
         private  boolean isRaised=false;
         private String key;
 
-
         private Lime() {}
 
         public BlockingQueue<E> getWire() {
@@ -226,11 +274,12 @@ public class LimeTree implements  ITree{
             this.isCommitted = true;
             if(this.isRaised==false) {this.limeTree.phaser.register();}
             boolean raising=false;
+            boolean queueTimeout=false;
+            boolean deathPill=false;
+
             //executor
-            if (this.consumeAsync &&
-                    this.foreEachExecutor == null) {
-                this.foreEachExecutor = Executors.newSingleThreadExecutor();
-            }
+            if (this.consumeAsync
+                    && this.foreEachExecutor == null) {this.foreEachExecutor = Executors.newSingleThreadExecutor();}
 
             try {
                 while (!Thread.currentThread().isInterrupted() && exit == false) {
@@ -238,18 +287,21 @@ public class LimeTree implements  ITree{
                     final E pill;
 
                     if (wiltingInMillis == -1) {
-                        //waiting until element become available
                         pill = this.queue.take();
                     } else {
-
-                        //waiting until the patience finish¡
-                        pill = this.queue
-                                .poll(this.wiltingInMillis, TimeUnit.MILLISECONDS);
+                        pill = this.queue.poll(this.wiltingInMillis, TimeUnit.MILLISECONDS);
                     }
 
                     if (limeTree.activitiesMonitorIsActive) {limeTree.treeActivitiesQueue.put(new Pill());}
 
-                    if (!(exit = pill == null)) {
+                    queueTimeout=pill == null;
+
+                    deathPill=pill instanceof Pill && ((Pill) pill).venom;
+
+                    if (!(exit = queueTimeout||deathPill)) {
+
+                        this.limeTree.defaultTreeLifeCycleListener.onPillIncome(this.limeTree,this,pill);
+
                         if (this.foreEachExecutor != null) {
                             CompletableFuture
                                     .runAsync(() -> act.forEach(pill, limeTree, this), this.foreEachExecutor);
@@ -262,25 +314,47 @@ public class LimeTree implements  ITree{
                 }
 
             } catch (InterruptedException ex1){
+
                 log.info("{} has been interrupted",this.toString());
+                this.limeTree.defaultTreeLifeCycleListener
+                        .onLimeFinish(this.limeTree,this, ELimeEnd.TREE_DEATH,ex1);
 
             } catch (Exception ex) {
                 //check if must restart
                 log.error("error on forEach {} ", ex.toString());
+
                 if (this.liveAye) {
+
                     log.info(String.format("Consumer %s death and riseAgain miracle!", this.toString()));
+
                     limeTree.riseAgain(this);
+
                     raising=true;
                 }
+
+                this.limeTree.defaultTreeLifeCycleListener
+                        .onLimeFinish(this.limeTree,this, ELimeEnd.ERROR,ex);
             }
 
-            if(raising==false){
-                log.info("deregister"+this.toString());
-                this.limeTree.phaser.arriveAndDeregister();
-            }
+
             this.isFinished = true;
-            if(exit){log.info(String.format("Consumer %s wilted and fallen!", this.toString()));}
+
+            if(queueTimeout){
+                  log.info(String.format("Consumer %s wilted and fallen!", this.toString()));
+                  this.limeTree.defaultTreeLifeCycleListener
+                          .onLimeFinish(this.limeTree,this, ELimeEnd.WILTING);
+            }
+
+            if(deathPill){
+                log.info(String.format("Consumer %s death for pill!", this.toString()));
+                this.limeTree.defaultTreeLifeCycleListener
+                        .onLimeFinish(this.limeTree,this, ELimeEnd.DEATH_PILL);
+            }
+
             log.info(String.format("Consumer %s end!", this.toString()));
+
+            if(raising==false){this.limeTree.phaser.arriveAndDeregister();}
+
         }
 
         /**
@@ -361,10 +435,7 @@ public class LimeTree implements  ITree{
                 return this;
             }
 
-            public FruitBuilder setProducerTree(LimeTree treeProducer) {
-                this.treeProducer = treeProducer;
-                return this;
-            }
+
 
             public Lime create() {
                 return this.create(null);

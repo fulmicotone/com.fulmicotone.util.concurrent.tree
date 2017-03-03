@@ -25,10 +25,16 @@ public class Test {
                 }, 0l, millis);
     }
 
-   @org.junit.Test
+    /**
+     * Brutal shutdown test
+     * @throws Exception
+     */
+    @org.junit.Test
     public void forceShutdownWholeSystemCase() throws Exception {
 
-        LimeTree tree=new LimeTree();
+       EventsCounter ec = new EventsCounter();
+       LimeTree tree=new LimeTree();
+       tree.addListener(ec);
         List<String> output=new ArrayList<>();
 
         final  BlockingQueue<String> fruitWireQueue = tree
@@ -53,16 +59,33 @@ public class Test {
         });
 
 
+
         tree.clearCutAwaitActs();//wait all acts finished
 
-        Assert.assertTrue("size was:"+output.size(),output.size()==5);
+       ec
+     .testAssert(
+             5,
+             1,
+             0,
+             0,
+             0,
+             0,
+             0,
+             0,
+             1);
+
     }
 
+    /**
+     * Shutdown for inactivity
+     */
     @org.junit.Test
     public void shutdownForTreeInactivityCase(){
-        List<String> output=new ArrayList<>();
 
+        EventsCounter ec = new EventsCounter();
         LimeTree tree=new LimeTree();
+        tree.addListener(ec);
+        List<String> output=new ArrayList<>();
 
         /**LIME A DEFINITION**/
         BlockingQueue<String> wireA = tree
@@ -99,17 +122,34 @@ public class Test {
 
          tree.setTimeoutForInactivity(2000 );
          tree.clearCutAwaitActs();
-         Assert.assertTrue("unexpected size",output.size()==11);
+
+        Assert.assertTrue("unexpected outputsize"+output.size(),output.size()==11);
+        ec.testAssert(22,
+                        2,
+                        0,
+                        0,
+                        2,
+                        0,
+                        1,
+                        0,
+                        0);
+
     }
 
+    /**
+     * Shutdown lime wilting
+     */
     @org.junit.Test
     public void shutdownForWiltingAllLimecase(){
 
-        List<String> output=new ArrayList<>();
+        EventsCounter ec = new EventsCounter();
         LimeTree tree=new LimeTree();
+        tree.addListener(ec);
+        List<String> output=new ArrayList<>();
+
 
        BlockingQueue<String> wire = tree.newLime()
-                .<String>setAct((pill, context, lime) -> {output.add((String) pill);})
+                .<String>setAct((pill, context, lime) -> output.add((String) pill))
                 .setWilting(500)
                 .create()
                 .getWire();
@@ -143,19 +183,37 @@ public class Test {
         });
         tree.clearCutAwaitActs();
         output.stream().forEach(System.out::println);
-      Assert.assertTrue("unexpected number of records:"+output.size(),output.size()==5);
+
+
+        Assert.assertTrue("unexpected number of records:"+output.size(),output.size()==5);
+
+        ec
+                .testAssert(5,
+                        2,
+                        0,
+                        0,
+                        0,
+                        2,
+                        0,
+                        0,
+                        1);
 
     }
 
 
     /**
-     * simula la presenza di due consumer infiniti ( con recommit in caso di eccezione)
-     * e verifica che vengano effettivamente riavviati in caso di eccezione
-     * e che vengano terminati in caso di rallentamenti*/
-     @org.junit.Test
+     * Live Aye Test multiconsumer
+     */
+    @org.junit.Test
     public void endlessLimeMultipartner(){
-        List<String> output=new ArrayList<>();
+        EventsCounter ec = new EventsCounter();
         LimeTree tree=new LimeTree();
+        tree.addListener(ec);
+        List<String> output=new ArrayList<>();
+
+
+
+
         BlockingQueue<String> wireA= tree.newLime()
                 .<String>setAct((pill, context, lime) -> {
             if(pill.equals("fire exception")){ throw new RuntimeException("sf"); }
@@ -165,6 +223,7 @@ public class Test {
                 .setLiveAye(true)
                 .create("A")
                 .getWire();
+
         BlockingQueue<String> wireB= tree.newLime()
                 .<String>setAct((pill, context, lime) -> {
                     if(pill.equals("fire exception")){ throw new RuntimeException("sf");}
@@ -172,23 +231,29 @@ public class Test {
                     System.out.println("b:"+pill);
                 })
                 .setWilting(1500)
+
                 .setLiveAye(true)
+
                 .create("B")
+
                 .getWire();
 
         doEach(500,(i)-> {
+
             if(i==2){wireB.add("fire exception"); return ;}
+
             if(i==3){wireA.add("fire exception"); return;}
+
             if(i>5){
                 try {
-                    Thread.sleep(1000);
+                    Thread.sleep(1500);
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
             }
             if(i>10){
                 try {
-                    Thread.sleep(1500);
+                    Thread.sleep(2000);
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
@@ -196,15 +261,41 @@ public class Test {
             wireB.add(UUID.randomUUID().toString());
             wireA.add(UUID.randomUUID().toString());
         });
+
         tree.clearCutAwaitActs();
+
       Assert.assertTrue("unexpected output size:"+output.size(),output.size()==13);
+
+
+        ec
+                .testAssert(-1,
+                        4, // two lime and two recommit
+                        0,
+                        2,
+                        0,
+                        2,
+                        0,
+                        0,
+                        1);
     }
 
-   @org.junit.Test
+    /**
+     * Live Aye single consumer
+     */
+
+    @org.junit.Test
     public void endlessSingleLime(){
 
-       List<String> output=new ArrayList<>();
-       LimeTree tree = new LimeTree();
+
+        EventsCounter ec = new EventsCounter();
+
+        LimeTree tree=new LimeTree();
+
+        tree.addListener(ec);
+
+        List<String> output=new ArrayList<>();
+
+
 
        BlockingQueue<String> wireA= tree.newLime()
                .<String>setAct((pill, context, lime) -> {
@@ -212,7 +303,6 @@ public class Test {
                    output.add((String) pill);
                    System.out.println(pill);
                })
-               .setWilting(2300)
                .setLiveAye(true)
                .create("A")
                .getWire();
@@ -221,6 +311,7 @@ public class Test {
         doEach(1000,(i)-> {
 
             if(i==2){ wireA.add("fire exception"); return;}
+
             if(i==5){tree.clearCutBrutal();}
 
             wireA.add(UUID.randomUUID().toString());
@@ -232,7 +323,56 @@ public class Test {
        Assert.assertTrue("unexpected output size:"+output.size(),output.size()==4);
 
 
+        ec
+                .testAssert(5,
+                        2,//one first commit one raiseAgain
+                        0,
+                        1,
+                        1,
+                        0,
+                        0,
+                        0,
+                        1);
 
+
+    }
+
+    /**
+     * DEATH WITH PILL
+     */
+    @org.junit.Test
+    public void pillDeath(){
+        EventsCounter ec = new EventsCounter();
+        LimeTree tree=new LimeTree();
+        tree.addListener(ec);
+        BlockingQueue<Item> wireA= tree.newLime()
+                .<Item>setAct((pill, context, lime) -> System.out.println(pill.toString()))
+                .setLiveAye(true)
+                .create("A")
+                .getWire();
+
+        doEach(300,(i)-> {
+            if(i==5){
+               Item item=new Item();
+               item.venom=true;
+                wireA.add(item);
+                return;}
+            wireA.add(new Item());
+        });
+
+        tree.clearCutAwaitActs();
+
+
+        ec
+                .testAssert(5,
+                        1,
+                        1,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        1);
 
     }
 
