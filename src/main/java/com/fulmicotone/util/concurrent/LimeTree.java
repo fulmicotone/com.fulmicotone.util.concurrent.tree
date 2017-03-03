@@ -14,9 +14,9 @@ public class LimeTree implements  ITree{
     private final Map<String, Lime> fruitsO2Map = new LinkedHashMap<>();
     private ExecutorService treeLocalExecutorService = Executors.newCachedThreadPool();
     private BlockingQueue<Pill> treeActivitiesQueue = new LinkedBlockingQueue<>();
-    private volatile long cutOnInactivityForMillis = -1;
-    private boolean activitiesMonitorIsActive=false;
-    private boolean terminatingForInactivities=false;
+    private  long cutOnInactivityForMillis = -1;
+    private  boolean activitiesMonitorIsActive=false;
+    private  boolean terminatingForInactivities=false;
     private Phaser phaser=new Phaser();
     private final DefaultTreeLifeCycle defaultTreeLifeCycleListener=new DefaultTreeLifeCycle();
 
@@ -30,6 +30,17 @@ public class LimeTree implements  ITree{
                 .get();
     }
 
+
+
+    public Map<String,Long> getWiresSize(){
+
+       return  fruitsO2Map.
+                values()
+                .stream()
+               .collect(Collectors
+                       .toMap((lime)->lime.key,(lime)->lime.queue.size()+0l));
+
+    }
 
 
     public void addListener(TreeLifeCycleListener listener){
@@ -47,6 +58,15 @@ public class LimeTree implements  ITree{
                 .collect(Collectors.toList())
                 .toArray(new Lime[0]));
         return true;
+    }
+
+
+
+    public boolean shutdownLimeBy(String key){
+
+        fruitsO2Map.get(key).forceShutdown=true;
+        return true;
+
     }
 
     /**SHUTDOWN METHOD Start **/
@@ -208,7 +228,7 @@ public class LimeTree implements  ITree{
 
     private class ActivitiesMonitor implements Runnable {
 
-        private final LimeTree tree;
+        private  final LimeTree tree;
         public ActivitiesMonitor(LimeTree tree) {
             this.tree = tree;
         }
@@ -246,10 +266,11 @@ public class LimeTree implements  ITree{
     public static class Lime<E> implements Runnable,ILime<E> {
 
         private Logger log = LoggerFactory.getLogger(this.getClass());
-        private LimeTree limeTree;
+        private  LimeTree limeTree;
         private Act act;
         private BlockingQueue<E> queue;
         private ExecutorService foreEachExecutor;
+
         //config
         private boolean liveAye;
         private boolean autoCommit = false;
@@ -259,6 +280,7 @@ public class LimeTree implements  ITree{
         private boolean isCommitted = false;
         private boolean isFinished = false;
         private  boolean isRaised=false;
+        boolean forceShutdown=false;
         private String key;
 
         private Lime() {}
@@ -266,6 +288,9 @@ public class LimeTree implements  ITree{
         public BlockingQueue<E> getWire() {
             return this.queue;
         }
+
+
+
 
         public void run() {
 
@@ -277,12 +302,14 @@ public class LimeTree implements  ITree{
             boolean queueTimeout=false;
             boolean deathPill=false;
 
+
             //executor
             if (this.consumeAsync
                     && this.foreEachExecutor == null) {this.foreEachExecutor = Executors.newSingleThreadExecutor();}
 
             try {
-                while (!Thread.currentThread().isInterrupted() && exit == false) {
+                while (!Thread.currentThread().isInterrupted() &&
+                        exit == false) {
 
                     final E pill;
 
@@ -298,7 +325,8 @@ public class LimeTree implements  ITree{
 
                     deathPill=pill instanceof Pill && ((Pill) pill).venom;
 
-                    if (!(exit = queueTimeout||deathPill)) {
+
+                    if (!(exit = queueTimeout||deathPill||forceShutdown)) {
 
                         this.limeTree.defaultTreeLifeCycleListener.onPillIncome(this.limeTree,this,pill);
 
@@ -351,9 +379,10 @@ public class LimeTree implements  ITree{
                         .onLimeFinish(this.limeTree,this, ELimeEnd.DEATH_PILL);
             }
 
-            log.info(String.format("Consumer %s end!", this.toString()));
+            if(forceShutdown){ log.info(String.format("Consumer %s force shutdown has been called!", this.toString()));}
 
             if(raising==false){this.limeTree.phaser.arriveAndDeregister();}
+            log.info(String.format("Consumer %s end!", this.toString()));
 
         }
 
