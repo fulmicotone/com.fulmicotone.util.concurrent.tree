@@ -120,7 +120,7 @@ public class LimeTree implements  ITree{
      **/
 
     public <E> Lime.FruitBuilder<E> newLime() {
-        return new Lime.FruitBuilder(this);
+        return new Lime.FruitBuilder<>(this);
     }
 
     private void tryCommitActivitiesMonitor() {
@@ -297,7 +297,7 @@ public class LimeTree implements  ITree{
             log.info(String.format("Consumer %s start!", this.toString()));
             boolean exit = false;
             this.isCommitted = true;
-            if(this.isRaised==false) {this.limeTree.phaser.register();}
+            if(!this.isRaised) {this.limeTree.phaser.register();}
             boolean raising=false;
             boolean queueTimeout=false;
             boolean deathPill=false;
@@ -309,7 +309,7 @@ public class LimeTree implements  ITree{
 
             try {
                 while (!Thread.currentThread().isInterrupted() &&
-                        exit == false) {
+                        !exit) {
 
                     final E pill;
 
@@ -381,7 +381,7 @@ public class LimeTree implements  ITree{
 
             if(forceShutdown){ log.info(String.format("Consumer %s force shutdown has been called!", this.toString()));}
 
-            if(raising==false){this.limeTree.phaser.arriveAndDeregister();}
+            if(!raising){this.limeTree.phaser.arriveAndDeregister();}
             log.info(String.format("Consumer %s end!", this.toString()));
 
         }
@@ -398,6 +398,7 @@ public class LimeTree implements  ITree{
 
             private LimeTree treeProducer;
             private BlockingQueue<E> wireQueue;
+            private ExecutorService executorService;
             private boolean liveAye;
             private Act<E> act;
             private boolean consumeAsync = false;
@@ -453,6 +454,12 @@ public class LimeTree implements  ITree{
                 return this;
             }
 
+            public FruitBuilder setExecutorService(ExecutorService executorService) {
+                this.executorService = executorService;
+                return this;
+            }
+
+
             /**
              * se if inside for each will be in other thread
              *
@@ -466,13 +473,13 @@ public class LimeTree implements  ITree{
 
 
 
-            public Lime create() {
+            public Lime<E> create() {
                 return this.create(null);
             }
 
-            public Lime create(String key) {
+            public Lime<E> create(String key) {
                 Objects.requireNonNull(this.act);
-                Lime limeToAdd = new Lime();
+                Lime<E> limeToAdd = new Lime<>();
                 key = key == null ? UUID.randomUUID().toString() : key;
                 limeToAdd.act = this.act;
                 limeToAdd.queue = this.wireQueue == null ? new LinkedTransferQueue() : this.wireQueue;
@@ -482,6 +489,7 @@ public class LimeTree implements  ITree{
                 limeToAdd.consumeAsync = this.consumeAsync;
                 limeToAdd.autoCommit = this.autocommit;
                 limeToAdd.key = key;
+                limeToAdd.foreEachExecutor = executorService ;
                 treeProducer.addFruit(limeToAdd);
                 return limeToAdd;
             }

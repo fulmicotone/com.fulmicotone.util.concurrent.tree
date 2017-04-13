@@ -1,5 +1,9 @@
 group 'com.fulmicotone.util.concurrent'
+<<<<<<< HEAD
 version '2017.03.002'
+=======
+version '2017.04.003'
+>>>>>>> release/v2017.04.003
 
 apply plugin: 'java'
 
