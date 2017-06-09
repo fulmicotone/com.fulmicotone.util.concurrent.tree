@@ -1,5 +1,6 @@
 package com.fulmicotone.util.concurrent;
 
+import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
 
 /**
@@ -8,6 +9,7 @@ import java.util.concurrent.BlockingQueue;
 public interface ILime<E> {
 
      BlockingQueue<E> getWire();
+     Optional<Act> getActIfFinished();
 
 }
 
