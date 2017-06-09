@@ -289,7 +289,10 @@ public class LimeTree implements  ITree{
             return this.queue;
         }
 
-
+        @Override
+        public Optional<Act> getActIfFinished() {
+            return isFinished ? Optional.of(act) : Optional.empty();
+        }
 
 
         public void run() {
